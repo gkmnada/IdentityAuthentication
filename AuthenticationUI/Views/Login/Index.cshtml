@@ -1,0 +1,21 @@
+﻿@model LoginViewModel
+
+@{
+    ViewData["Title"] = "Index";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+}
+
+<form method="post">
+
+    <input type="text" asp-for="Username" class="form-control" placeholder="Kullanıcı Adı" autocomplete="off" />
+
+    <br />
+
+    <input type="password" asp-for="Password" class="form-control" placeholder="Şifre" autocomplete="off" />
+
+    <br />
+
+    <button class="btn btn-primary" type="submit">Giriş Yap</button>
+
+</form>
+
