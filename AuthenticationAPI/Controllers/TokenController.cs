@@ -48,7 +48,7 @@ namespace AuthenticationAPI.Controllers
             var token = JwtTokenGenerator.GenerateToken(checkAppUserModel);
 
             existingToken.Token = JwtTokenGenerator.GenerateRefreshToken();
-            existingToken.Expiration = DateTime.Now.AddMinutes(JwtTokenDefaults.RefreshTokenExpiration);
+            existingToken.Expiration = DateTime.Now.AddDays(JwtTokenDefaults.RefreshTokenExpiration);
             existingToken.IsRevoked = false;
 
             _context.RefreshTokens.Update(existingToken);

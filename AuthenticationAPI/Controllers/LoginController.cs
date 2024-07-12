@@ -60,7 +60,7 @@ namespace AuthenticationAPI.Controllers
                                 {
                                     Token = refreshToken,
                                     UserId = user.Id,
-                                    Expiration = DateTime.Now.AddMinutes(JwtTokenDefaults.RefreshTokenExpiration),
+                                    Expiration = DateTime.Now.AddDays(JwtTokenDefaults.RefreshTokenExpiration),
                                     IsRevoked = false
                                 };
 

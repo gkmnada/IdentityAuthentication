@@ -23,7 +23,7 @@ namespace AuthenticationAPI.Controllers
             {
                 Name = "Gökmen Ada",
                 UserName = "gkmenada",
-                Email = "gkmenada@hotmail.com"
+                Email = "gkmenada@xyz.com"
             };
 
             var result = await _userManager.CreateAsync(user, "Ada2024++");
