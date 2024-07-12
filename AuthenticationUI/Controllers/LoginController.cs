@@ -48,10 +48,10 @@ namespace AuthenticationUI.Controllers
                     if (tokenModel.Token != null)
                     {
                         claims.Add(new Claim("JwtAuthToken", tokenModel.Token));
+                        claims.Add(new Claim("RefreshToken", tokenModel.RefreshToken));
                         var claimsIdentity = new ClaimsIdentity(claims, JwtBearerDefaults.AuthenticationScheme);
                         var authProperties = new AuthenticationProperties
                         {
-                            ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
                             IsPersistent = false
                         };
 

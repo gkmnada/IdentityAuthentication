@@ -1,4 +1,5 @@
-﻿using AuthenticationAPI.Entities;
+﻿using AuthenticationAPI.Context;
+using AuthenticationAPI.Entities;
 using AuthenticationAPI.Models;
 using AuthenticationAPI.Tools;
 using Microsoft.AspNetCore.Http;
@@ -13,11 +14,13 @@ namespace AuthenticationAPI.Controllers
     {
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly SignInManager<ApplicationUser> _signInManager;
+        private readonly ApplicationDbContext _context;
 
-        public LoginController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager)
+        public LoginController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, ApplicationDbContext context)
         {
             _userManager = userManager;
             _signInManager = signInManager;
+            _context = context;
         }
 
         [HttpPost]
@@ -43,12 +46,28 @@ namespace AuthenticationAPI.Controllers
                         {
                             if (await _userManager.IsInRoleAsync(user, "User"))
                             {
-                                GetCheckAppUserModel checkAppUserModel = new GetCheckAppUserModel();
-                                checkAppUserModel.Id = user.Id;
-                                checkAppUserModel.Username = user.UserName;
-                                checkAppUserModel.IsExist = true;
+                                GetCheckAppUserModel checkAppUserModel = new GetCheckAppUserModel
+                                {
+                                    Id = user.Id,
+                                    Username = user.UserName,
+                                    IsExist = true
+                                };
+
                                 var token = JwtTokenGenerator.GenerateToken(checkAppUserModel);
-                                return Created("", token);
+                                var refreshToken = JwtTokenGenerator.GenerateRefreshToken();
+
+                                var entity = new RefreshToken
+                                {
+                                    Token = refreshToken,
+                                    UserId = user.Id,
+                                    Expiration = DateTime.Now.AddMinutes(JwtTokenDefaults.RefreshTokenExpiration),
+                                    IsRevoked = false
+                                };
+
+                                await _context.RefreshTokens.AddAsync(entity);
+                                await _context.SaveChangesAsync();
+
+                                return Created("", new { token.Token, token.ExpireDate, RefreshToken = refreshToken });
                             }
                             else
                             {
