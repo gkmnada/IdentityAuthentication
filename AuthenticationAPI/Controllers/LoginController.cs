@@ -2,9 +2,9 @@
 using AuthenticationAPI.Entities;
 using AuthenticationAPI.Models;
 using AuthenticationAPI.Tools;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace AuthenticationAPI.Controllers
 {
@@ -15,88 +15,70 @@ namespace AuthenticationAPI.Controllers
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly SignInManager<ApplicationUser> _signInManager;
         private readonly ApplicationDbContext _context;
+        private readonly JwtTokenGenerator _jwtTokenGenerator;
+        private readonly JwtTokenDefaults _jwtTokenDefaults;
 
-        public LoginController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, ApplicationDbContext context)
+        public LoginController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, ApplicationDbContext context, JwtTokenGenerator jwtTokenGenerator, IOptions<JwtTokenDefaults> jwtTokenDefaults)
         {
             _userManager = userManager;
             _signInManager = signInManager;
             _context = context;
+            _jwtTokenGenerator = jwtTokenGenerator;
+            _jwtTokenDefaults = jwtTokenDefaults.Value;
         }
 
         [HttpPost]
-        public async Task<IActionResult> Login(LoginModel model)
+        public async Task<IActionResult> LoginAsync(LoginModel model)
         {
             var user = await _userManager.FindByNameAsync(model.Username);
 
-            if (user != null)
+            if (user == null)
             {
-                var result = await _signInManager.CheckPasswordSignInAsync(user, model.Password, true);
-
-                if (result.Succeeded)
-                {
-                    if (!await _userManager.IsEmailConfirmedAsync(user))
-                    {
-                        return BadRequest("Email is not confirmed");
-                    }
-                    else
-                    {
-                        var login = await _signInManager.PasswordSignInAsync(model.Username, model.Password, true, true);
-
-                        if (login.Succeeded)
-                        {
-                            if (await _userManager.IsInRoleAsync(user, "User"))
-                            {
-                                GetCheckAppUserModel checkAppUserModel = new GetCheckAppUserModel
-                                {
-                                    Id = user.Id,
-                                    Username = user.UserName,
-                                    IsExist = true
-                                };
-
-                                var token = JwtTokenGenerator.GenerateToken(checkAppUserModel);
-                                var refreshToken = JwtTokenGenerator.GenerateRefreshToken();
-
-                                var entity = new RefreshToken
-                                {
-                                    Token = refreshToken,
-                                    UserId = user.Id,
-                                    Expiration = DateTime.Now.AddDays(JwtTokenDefaults.RefreshTokenExpiration),
-                                    IsRevoked = false
-                                };
-
-                                await _context.RefreshTokens.AddAsync(entity);
-                                await _context.SaveChangesAsync();
-
-                                return Created("", new { token.Token, token.ExpireDate, RefreshToken = refreshToken });
-                            }
-                            else
-                            {
-                                return BadRequest("User is not in role");
-                            }
-                        }
-                        else if (login.IsLockedOut)
-                        {
-                            return BadRequest("User is locked out");
-                        }
-                        else
-                        {
-                            return BadRequest("Invalid login attempt");
-                        }
-                    }
-                }
-                else if (result.IsLockedOut)
-                {
-                    return BadRequest("User is locked out");
-                }
-                else
-                {
-                    return BadRequest("Invalid login attempt");
-                }
+                return BadRequest(new ApiErrorResponse { Code = "UserNotFound", Message = "User not found" });
             }
-            else
+
+            var result = await _signInManager.CheckPasswordSignInAsync(user, model.Password, true);
+
+            if (!result.Succeeded)
             {
-                return BadRequest("User not found");
+                return Unauthorized(new ApiErrorResponse { Code = "InvalidLoginAttempt", Message = "Invalid login attempt" });
             }
+            else if (result.IsLockedOut)
+            {
+                return Unauthorized(new ApiErrorResponse { Code = "AccountLocked", Message = "Account is locked out" });
+            }
+
+            if (!await _userManager.IsEmailConfirmedAsync(user))
+            {
+                return Unauthorized(new ApiErrorResponse { Code = "EmailNotConfirmed", Message = "Email is not confirmed" });
+            }
+
+            if (!await _userManager.IsInRoleAsync(user, "User"))
+            {
+                return Unauthorized(new ApiErrorResponse { Code = "UnauthorizedAccess", Message = "Unauthorized access" });
+            }
+
+            var token = _jwtTokenGenerator.GenerateToken(new JwtTokenRequest
+            {
+                UserID = user.Id,
+                Username = user.UserName,
+                Email = user.Email,
+                Roles = (await _userManager.GetRolesAsync(user)).ToList()
+            });
+
+            var refreshToken = _jwtTokenGenerator.GenerateRefreshToken();
+
+            await _context.RefreshTokens.AddAsync(new RefreshToken
+            {
+                Token = refreshToken,
+                UserID = user.Id,
+                Expiration = DateTime.UtcNow.AddDays(_jwtTokenDefaults.RefreshTokenExpires),
+                IsRevoked = false
+            });
+
+            await _context.SaveChangesAsync();
+
+            return Created("", new { AccessToken = token.Token, ExpireDate = token.ExpireDate, RefreshToken = refreshToken });
         }
     }
 }

@@ -1,31 +1,45 @@
-﻿using Microsoft.IdentityModel.Tokens;
+﻿using AuthenticationAPI.Models;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using AuthenticationAPI.Models;
-using System.Security.Cryptography;
 
 namespace AuthenticationAPI.Tools
 {
     public class JwtTokenGenerator
     {
-        public static JwtTokenResponse GenerateToken(GetCheckAppUserModel checkAppUserModel)
+        private readonly JwtTokenDefaults _jwtTokenDefaults;
+
+        public JwtTokenGenerator(IOptions<JwtTokenDefaults> jwtTokenDefaults)
+        {
+            _jwtTokenDefaults = jwtTokenDefaults.Value;
+        }
+
+        public JwtTokenResponse GenerateToken(JwtTokenRequest request)
         {
             var claims = new List<Claim>
             {
-                new Claim(ClaimTypes.NameIdentifier, checkAppUserModel.Id),
-                new Claim(ClaimTypes.Name, checkAppUserModel.Username),
+                new Claim(ClaimTypes.NameIdentifier, request.UserID),
+                new Claim(ClaimTypes.Name, request.Username),
+                new Claim(ClaimTypes.Email, request.Email),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
 
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(JwtTokenDefaults.SecretKey));
+            foreach (var role in request.Roles)
+            {
+                claims.Add(new Claim(ClaimTypes.Role, role));
+            }
+
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtTokenDefaults.SecretKey));
             var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-            var expires = DateTime.Now.AddMinutes(JwtTokenDefaults.AccessTokenExpiration);
+            var expires = DateTime.UtcNow.AddMinutes(_jwtTokenDefaults.AccessTokenExpires);
 
             var token = new JwtSecurityToken(
-                issuer: JwtTokenDefaults.ValidIssuer,
-                audience: JwtTokenDefaults.ValidAudience,
+                issuer: _jwtTokenDefaults.ValidIssuer,
+                audience: _jwtTokenDefaults.ValidAudience,
                 claims: claims,
-                notBefore: DateTime.Now,
+                notBefore: DateTime.UtcNow,
                 expires: expires,
                 signingCredentials: credentials
             );
@@ -34,9 +48,10 @@ namespace AuthenticationAPI.Tools
             return new JwtTokenResponse(tokenHandler.WriteToken(token), expires);
         }
 
-        public static string GenerateRefreshToken()
+        public string GenerateRefreshToken()
         {
-            return Guid.NewGuid().ToString();
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Guid.NewGuid().ToString()));
+            return Convert.ToBase64String(key.Key);
         }
     }
 }

@@ -2,9 +2,9 @@
 using AuthenticationAPI.Entities;
 using AuthenticationAPI.Models;
 using AuthenticationAPI.Tools;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace AuthenticationAPI.Controllers
 {
@@ -14,47 +14,65 @@ namespace AuthenticationAPI.Controllers
     {
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly ApplicationDbContext _context;
+        private readonly JwtTokenGenerator _jwtTokenGenerator;
+        private readonly JwtTokenDefaults _jwtTokenDefaults;
 
-        public TokenController(UserManager<ApplicationUser> userManager, ApplicationDbContext context)
+        public TokenController(UserManager<ApplicationUser> userManager, ApplicationDbContext context, JwtTokenGenerator jwtTokenGenerator, IOptions<JwtTokenDefaults> jwtTokenDefaults)
         {
             _userManager = userManager;
             _context = context;
+            _jwtTokenGenerator = jwtTokenGenerator;
+            _jwtTokenDefaults = jwtTokenDefaults.Value;
         }
 
-        [HttpGet]
-        public async Task<IActionResult> RefreshToken(string refreshToken)
+        [HttpPut]
+        public async Task<IActionResult> UpdateRefreshTokenAsync(RefreshTokenDto refreshTokenDto)
         {
-            var existingToken = _context.RefreshTokens.FirstOrDefault(x => x.Token == refreshToken);
+            var existingToken = _context.RefreshTokens.FirstOrDefault(x => x.Token == refreshTokenDto.RefreshToken);
 
             if (existingToken == null || existingToken.IsRevoked)
             {
                 return BadRequest("Invalid refresh token");
             }
 
-            var user = await _userManager.FindByIdAsync(existingToken.UserId);
+            if (existingToken.Expiration < DateTime.UtcNow)
+            {
+                existingToken.IsRevoked = true;
+
+                _context.RefreshTokens.Update(existingToken);
+                await _context.SaveChangesAsync();
+
+                return BadRequest("Refresh token expired");
+            }
+
+            var user = await _userManager.FindByIdAsync(existingToken.UserID);
 
             if (user == null)
             {
                 return BadRequest("User not found");
             }
 
-            var checkAppUserModel = new GetCheckAppUserModel
+            var token = _jwtTokenGenerator.GenerateToken(new JwtTokenRequest
             {
-                Id = user.Id,
+                UserID = user.Id,
                 Username = user.UserName,
-                IsExist = true
-            };
+                Email = user.Email,
+                Roles = (await _userManager.GetRolesAsync(user)).ToList()
+            });
 
-            var token = JwtTokenGenerator.GenerateToken(checkAppUserModel);
-
-            existingToken.Token = JwtTokenGenerator.GenerateRefreshToken();
-            existingToken.Expiration = DateTime.Now.AddDays(JwtTokenDefaults.RefreshTokenExpiration);
-            existingToken.IsRevoked = false;
+            existingToken.Token = _jwtTokenGenerator.GenerateRefreshToken();
 
             _context.RefreshTokens.Update(existingToken);
             await _context.SaveChangesAsync();
 
-            return Ok(new { token.Token, token.ExpireDate, RefreshToken = existingToken.Token });
+            return Ok(new { AccessToken = token.Token, ExpireDate = token.ExpireDate, RefreshToken = existingToken.Token });
         }
+
+        #region DTO
+        public class RefreshTokenDto
+        {
+            public string RefreshToken { get; set; }
+        }
+        #endregion
     }
 }

@@ -1,6 +1,6 @@
 ﻿using AuthenticationUI.Models;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
 using System.IdentityModel.Tokens.Jwt;
@@ -29,8 +29,10 @@ namespace AuthenticationUI.Controllers
         public async Task<IActionResult> Index(LoginViewModel model)
         {
             var client = _clientFactory.CreateClient();
+
             var content = new StringContent(JsonConvert.SerializeObject(model), Encoding.UTF8, "application/json");
             var response = await client.PostAsync("https://localhost:7229/api/Login", content);
+
             if (response.IsSuccessStatusCode)
             {
                 var jsonData = await response.Content.ReadAsStringAsync();
@@ -42,28 +44,45 @@ namespace AuthenticationUI.Controllers
                 if (tokenModel != null)
                 {
                     JwtSecurityTokenHandler tokenHandler = new JwtSecurityTokenHandler();
-                    var token = tokenHandler.ReadJwtToken(tokenModel.Token);
+                    var token = tokenHandler.ReadJwtToken(tokenModel.AccessToken);
+
                     var claims = token.Claims.ToList();
+                    claims.Add(new Claim("IdentityAuthentication", tokenModel.AccessToken));
+                    claims.Add(new Claim("RefreshToken", tokenModel.RefreshToken));
 
-                    if (tokenModel.Token != null)
+                    var roles = token.Claims.Where(x => x.Type == ClaimTypes.Role).Select(x => x.Value).ToList();
+
+                    foreach (var role in roles)
                     {
-                        claims.Add(new Claim("JwtAuthToken", tokenModel.Token));
-                        claims.Add(new Claim("RefreshToken", tokenModel.RefreshToken));
-                        var claimsIdentity = new ClaimsIdentity(claims, JwtBearerDefaults.AuthenticationScheme);
-                        var authProperties = new AuthenticationProperties
-                        {
-                            IsPersistent = false
-                        };
-
-                        await HttpContext.SignInAsync(JwtBearerDefaults.AuthenticationScheme, new ClaimsPrincipal(claimsIdentity), authProperties);
-                        return RedirectToAction("Index", "Home");
+                        claims.Add(new Claim(ClaimTypes.Role, role));
                     }
+
+                    var claimsIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+                    var authProperties = new AuthenticationProperties
+                    {
+                        IsPersistent = true
+                    };
+
+                    await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(claimsIdentity), authProperties);
+                    return RedirectToAction("Index", "Home");
                 }
                 else
                 {
                     return View();
                 }
             }
+            else
+            {
+                var jsonData = await response.Content.ReadAsStringAsync();
+
+                var error = JsonConvert.DeserializeObject<ErrorResponseModel>(jsonData);
+
+                if (error != null)
+                {
+                    ViewBag.Error = error.Message;
+                }
+            }
+
             return View();
         }
     }

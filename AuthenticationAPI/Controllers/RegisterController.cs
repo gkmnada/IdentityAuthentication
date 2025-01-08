@@ -1,5 +1,5 @@
 ﻿using AuthenticationAPI.Entities;
-using Microsoft.AspNetCore.Http;
+using AuthenticationAPI.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 
@@ -17,20 +17,20 @@ namespace AuthenticationAPI.Controllers
         }
 
         [HttpPost]
-        public async Task<IActionResult> Register()
+        public async Task<IActionResult> RegisterAsync(RegisterModel model)
         {
             var user = new ApplicationUser
             {
-                Name = "Gökmen Ada",
-                UserName = "gkmenada",
-                Email = "gkmenada@xyz.com"
+                Name = model.Name,
+                UserName = model.Username,
+                Email = model.Email
             };
 
-            var result = await _userManager.CreateAsync(user, "Ada2024++");
+            var result = await _userManager.CreateAsync(user, model.Password);
 
             if (result.Succeeded)
             {
-                return Ok();
+                return Created();
             }
 
             return BadRequest(result.Errors);

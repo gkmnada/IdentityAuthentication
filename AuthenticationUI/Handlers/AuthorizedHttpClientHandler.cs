@@ -1,8 +1,11 @@
-﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using AuthenticationUI.Models;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Newtonsoft.Json;
+using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Security.Claims;
-using AuthenticationUI.Models;
+using System.Text;
 using System.Text.Json;
 
 namespace AuthenticationUI.Handlers
@@ -20,52 +23,77 @@ namespace AuthenticationUI.Handlers
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var token = _httpContextAccessor.HttpContext.User.Claims.FirstOrDefault(x => x.Type == "JwtAuthToken")?.Value;
+            var accessToken = _httpContextAccessor.HttpContext.User.Claims.FirstOrDefault(x => x.Type == "IdentityAuthentication")?.Value;
             var refreshToken = _httpContextAccessor.HttpContext.User.Claims.FirstOrDefault(x => x.Type == "RefreshToken")?.Value;
 
-            if (!string.IsNullOrWhiteSpace(token))
+            if (!string.IsNullOrWhiteSpace(accessToken))
             {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
             }
 
             var response = await base.SendAsync(request, cancellationToken);
 
             if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && !string.IsNullOrWhiteSpace(refreshToken))
             {
-                var newTokens = await RefreshToken(refreshToken);
-                if (newTokens != null)
-                {
-                    var claims = new List<Claim>
-                {
-                    new Claim("JwtAuthToken", newTokens.Token),
-                    new Claim("RefreshToken", newTokens.RefreshToken)
-                };
+                var newToken = await RefreshToken(refreshToken);
 
-                    var claimsIdentity = new ClaimsIdentity(claims, JwtBearerDefaults.AuthenticationScheme);
+                if (newToken != null)
+                {
+                    var tokenHandler = new JwtSecurityTokenHandler();
+                    var token = tokenHandler.ReadJwtToken(newToken.AccessToken);
+
+                    var claims = _httpContextAccessor.HttpContext.User.Claims.ToList();
+
+                    claims.RemoveAll(x => x.Type == "IdentityAuthentication" || x.Type == "RefreshToken");
+
+                    claims.Add(new Claim("IdentityAuthentication", newToken.AccessToken));
+                    claims.Add(new Claim("RefreshToken", newToken.RefreshToken));
+
+                    var roles = token.Claims.Where(x => x.Type == ClaimTypes.Role).Select(x => x.Value).ToList();
+
+                    foreach (var role in roles)
+                    {
+                        claims.Add(new Claim(ClaimTypes.Role, role));
+                    }
+
+                    var claimsIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
                     var authProperties = new AuthenticationProperties
                     {
-                        IsPersistent = false
+                        IsPersistent = true
                     };
 
-                    await _httpContextAccessor.HttpContext.SignInAsync(JwtBearerDefaults.AuthenticationScheme, new ClaimsPrincipal(claimsIdentity), authProperties);
+                    var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
-                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", newTokens.Token);
+                    await _httpContextAccessor.HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, claimsPrincipal, authProperties);
+
+                    _httpContextAccessor.HttpContext.User = claimsPrincipal;
+
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", newToken.AccessToken);
                     response = await base.SendAsync(request, cancellationToken);
                 }
                 else
                 {
-                    await _httpContextAccessor.HttpContext.SignOutAsync(JwtBearerDefaults.AuthenticationScheme);
+                    await _httpContextAccessor.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
                     _httpContextAccessor.HttpContext.Response.Redirect("/Login/Index");
+                    await _httpContextAccessor.HttpContext.Response.CompleteAsync();
                 }
             }
-
             return response;
         }
 
         private async Task<JwtResponseModel> RefreshToken(string refreshToken)
         {
+            var refreshTokenDto = new RefreshTokenDto
+            {
+                RefreshToken = refreshToken
+            };
+
             var client = _clientFactory.CreateClient();
-            var response = await client.GetAsync("https://localhost:7229/api/Token?refreshToken=" + refreshToken);
+
+            var json = JsonConvert.SerializeObject(refreshTokenDto);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await client.PutAsync("https://localhost:7229/api/Token", content);
+
             if (response.IsSuccessStatusCode)
             {
                 var jsonData = await response.Content.ReadAsStringAsync();
@@ -74,7 +102,15 @@ namespace AuthenticationUI.Handlers
                     PropertyNamingPolicy = JsonNamingPolicy.CamelCase
                 });
             }
+
             return null;
         }
+
+        #region DTO
+        private class RefreshTokenDto
+        {
+            public string RefreshToken { get; set; }
+        }
+        #endregion
     }
 }

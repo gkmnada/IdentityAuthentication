@@ -1,33 +1,38 @@
 using AuthenticationUI.Handlers;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+using AuthenticationUI.Services.Customer;
+using Microsoft.AspNetCore.Authentication.Cookies;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddCookie(JwtBearerDefaults.AuthenticationScheme, options =>
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options =>
 {
     options.LoginPath = "/Login/Index";
     options.AccessDeniedPath = "/Error/Error404";
-    options.Cookie.SameSite = SameSiteMode.Strict;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-    options.Cookie.Name = "JwtAuthToken";
+    options.Cookie.Name = "IdentityAuthentication";
+    options.Cookie.SameSite = SameSiteMode.None;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.HttpOnly = true;
+    options.Cookie.IsEssential = true;
+    options.ExpireTimeSpan = TimeSpan.FromDays(15);
+    options.SlidingExpiration = true;
 });
 
 builder.Services.AddTransient<AuthorizedHttpClientHandler>();
-builder.Services.AddHttpClient("AuthorizedClient")
-    .AddHttpMessageHandler<AuthorizedHttpClientHandler>();
+
+builder.Services.AddHttpClient<ICustomerService, CustomerService>(client =>
+{
+    client.BaseAddress = new Uri("https://localhost:7229/api/");
+}).AddHttpMessageHandler<AuthorizedHttpClientHandler>();
 
 builder.Services.AddControllersWithViews();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/Home/Error");
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
 
